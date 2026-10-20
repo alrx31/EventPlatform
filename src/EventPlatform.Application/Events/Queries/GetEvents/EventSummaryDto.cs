@@ -7,4 +7,7 @@ public record EventSummaryDto(
     DateTime StartDate,
     string Status,
     string OrganizerName,
-    int AvailableTickets);
+    int AvailableTickets,
+    int TotalTickets,
+    decimal? MinPrice,
+    DateTime EndDate);

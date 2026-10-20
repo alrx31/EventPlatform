@@ -3,4 +3,5 @@ namespace EventPlatform.Application.Registrations.Commands.CheckInTicket;
 public record CheckInResultDto(
     string AttendeeName,
     string EventTitle,
-    DateTime EventDate);
+    DateTime EventDate,
+    string TicketTypeName);

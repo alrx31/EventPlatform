@@ -2,6 +2,7 @@ using System.Net.Mail;
 using EventPlatform.Application.Common.Interfaces;
 using MailKit.Security;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using MimeKit;
 using SmtpClient = MailKit.Net.Smtp.SmtpClient;
 
@@ -10,10 +11,12 @@ namespace EventPlatform.Infrastructure.Services;
 public class EmailService : IEmailService
 {
     private readonly IConfiguration _configuration;
+    private readonly ILogger<EmailService> _logger;
 
-    public EmailService(IConfiguration configuration)
+    public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
     {
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task SendTicketConfirmationAsync(
@@ -46,6 +49,18 @@ public class EmailService : IEmailService
 
         message.Body = htmlBody;
 
+        try
+        {
+            await SendAsync(message, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Ticket email to {Email} was not sent", toEmail);
+        }
+    }
+
+    private async Task SendAsync(MimeMessage message, CancellationToken cancellationToken)
+    {
         using var client = new SmtpClient();
         await client.ConnectAsync(
             _configuration["EmailSettings:SmtpHost"],

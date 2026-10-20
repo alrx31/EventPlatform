@@ -18,7 +18,7 @@ public class GetEventsQueryHandler : IRequestHandler<GetEventsQuery, PagedResult
 
     public async Task<PagedResult<EventSummaryDto>> Handle(GetEventsQuery request, CancellationToken cancellationToken)
     {
-        var cacheKey = $"events:list:{request.SearchTerm ?? "all"}:{request.Status ?? "all"}:page:{request.Page}:size:{request.PageSize}";
+        var cacheKey = $"events:list:v2:{request.SearchTerm ?? "all"}:{request.Status ?? "all"}:page:{request.Page}:size:{request.PageSize}";
         
         var cached = await _cache.GetAsync<PagedResult<EventSummaryDto>>(cacheKey,  cancellationToken);
         if (cached is not null)
@@ -55,7 +55,10 @@ public class GetEventsQueryHandler : IRequestHandler<GetEventsQuery, PagedResult
                 e.StartDate,
                 e.Status.ToString(),
                 e.Organizer.FullName,
-                e.TicketTypes.Sum(tt => tt.TotalQuantity - tt.SoldQuantity)))
+                e.TicketTypes.Sum(tt => tt.TotalQuantity - tt.SoldQuantity),
+                e.TicketTypes.Sum(tt => tt.TotalQuantity),
+                e.TicketTypes.Min(tt => (decimal?)tt.Price),
+                e.EndDate))
             .ToListAsync(cancellationToken);
         
         var result = new PagedResult<EventSummaryDto>(items, totalCount, request.Page, request.PageSize);

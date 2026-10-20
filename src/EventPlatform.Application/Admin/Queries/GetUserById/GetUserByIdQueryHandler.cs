@@ -30,6 +30,7 @@ public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, AdminUs
                 u.FullName,
                 u.Role.ToString(),
                 u.IsBlocked,
+                u.IsApprovedOrganizer,
                 u.CreatedAt,
                 u.OrganizedEvents.Count(),
                 _context.Registrations.Count(r => r.UserId == u.Id)))

@@ -56,7 +56,10 @@ public class GetAllEventsQueryHandler : IRequestHandler<GetAllEventsQuery, Paged
                 e.StartDate,
                 e.Status.ToString(),
                 e.Organizer.FullName,
-                e.TicketTypes.Sum(tt => tt.TotalQuantity - tt.SoldQuantity)))
+                e.TicketTypes.Sum(tt => tt.TotalQuantity - tt.SoldQuantity),
+                e.TicketTypes.Sum(tt => tt.TotalQuantity),
+                e.TicketTypes.Min(tt => (decimal?)tt.Price),
+                e.EndDate))
             .ToListAsync(cancellationToken);
 
         return new PagedResult<EventSummaryDto>(items, totalCount, request.Page, request.PageSize);

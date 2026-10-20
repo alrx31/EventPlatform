@@ -14,6 +14,7 @@ public record UserDto(
     string FullName,
     string Role,
     bool IsBlocked,
+    bool IsApprovedOrganizer,
     DateTime CreatedAt,
     int EventsCount,
     int RegistrationsCount);

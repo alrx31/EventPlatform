@@ -18,12 +18,17 @@ public class CheckInTicketCommandHandler : IRequestHandler<CheckInTicketCommand,
 
     public async Task<CheckInResultDto> Handle(CheckInTicketCommand request, CancellationToken cancellationToken)
     {
-        var ticket = await _context.Tickets
+        var query = _context.Tickets
             .Include(t => t.Registration)
             .ThenInclude(r => r.User)
             .Include(t => t.Registration)
             .ThenInclude(r => r.Event)
-            .FirstOrDefaultAsync(t => t.QrCode == request.QrCode, cancellationToken);
+            .Include(t => t.Registration)
+            .ThenInclude(r => r.TicketType);
+
+        var ticket = Guid.TryParse(request.QrCode.Trim(), out var registrationId)
+            ? await query.FirstOrDefaultAsync(t => t.RegistrationId == registrationId, cancellationToken)
+            : await query.FirstOrDefaultAsync(t => t.QrCode == request.QrCode, cancellationToken);
 
         if (ticket is null)
             throw new DomainException("Invalid QR code.");
@@ -38,6 +43,7 @@ public class CheckInTicketCommandHandler : IRequestHandler<CheckInTicketCommand,
         return new CheckInResultDto(
             ticket.Registration.User.FullName,
             ticket.Registration.Event.Title,
-            ticket.Registration.Event.StartDate);
+            ticket.Registration.Event.StartDate,
+            ticket.Registration.TicketType.Name);
     }
 }
