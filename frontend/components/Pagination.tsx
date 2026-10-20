@@ -1,3 +1,5 @@
+'use client'
+
 import { useTranslation } from '@/i18n';
 
 interface PaginationProps {
@@ -10,28 +12,30 @@ interface PaginationProps {
 
 export default function Pagination({ page, totalPages, hasNextPage, hasPreviousPage, onPageChange }: PaginationProps) {
     const { t } = useTranslation();
-    
     if (totalPages <= 1) return null;
 
+    const pages: number[] = [];
+    const from = Math.max(1, Math.min(page - 2, totalPages - 4));
+    for (let p = from; p <= Math.min(totalPages, from + 4); p++) pages.push(p);
+
     return (
-        <div className="flex justify-center gap-2 mt-8">
-            <button
-                onClick={() => onPageChange(page - 1)}
-                disabled={!hasPreviousPage}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-50 hover:bg-gray-50 cursor-pointer"
-            >
+        <nav className="mt-8 flex items-center justify-center gap-2" aria-label="Pagination">
+            <button onClick={() => onPageChange(page - 1)} disabled={!hasPreviousPage} className="btn btn-secondary btn-sm">
                 {t('pagination.previous')}
             </button>
-            <span className="px-4 py-2 text-sm text-gray-600">
-                {t('pagination.page').replace('{{page}}', String(page)).replace('{{total}}', String(totalPages))}
-            </span>
-            <button
-                onClick={() => onPageChange(page + 1)}
-                disabled={!hasNextPage}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-50 hover:bg-gray-50 cursor-pointer"
-            >
+            {pages.map(p => (
+                <button
+                    key={p}
+                    onClick={() => onPageChange(p)}
+                    aria-current={p === page ? 'page' : undefined}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[10px] text-sm font-semibold ${p === page ? 'bg-brand-600 text-white' : 'text-muted hover:bg-neutral-bg'}`}
+                >
+                    {p}
+                </button>
+            ))}
+            <button onClick={() => onPageChange(page + 1)} disabled={!hasNextPage} className="btn btn-secondary btn-sm">
                 {t('pagination.next')}
             </button>
-        </div>
+        </nav>
     );
 }

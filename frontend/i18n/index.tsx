@@ -40,6 +40,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
+    useEffect(() => {
+        document.documentElement.lang = language;
+    }, [language]);
+
     const setLanguage = (lang: 'ru' | 'en') => {
         setLanguageState(lang);
         localStorage.setItem('language', lang);

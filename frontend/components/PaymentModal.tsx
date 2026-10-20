@@ -1,193 +1,133 @@
 'use client'
 
-import { useEffect, useState } from 'react';
-import { X, CreditCard, Lock } from 'lucide-react';
+import { useState } from 'react';
+import { CreditCard, Lock, X } from 'lucide-react';
+import Modal from '@/components/ui/Modal';
+import Alert from '@/components/ui/Alert';
+import { useTranslation } from '@/i18n';
+import { fmt, money } from '@/lib/utils';
 
 interface PaymentModalProps {
     amount: number;
     ticketName: string;
+    eventTitle: string;
     eventId: string;
     ticketTypeId: string;
     onSuccess: () => void;
     onClose: () => void;
 }
 
-export default function PaymentModal({
-    amount,
-    ticketName,
-    eventId,
-    ticketTypeId,
-    onSuccess,
-    onClose,
-} : PaymentModalProps) {
+export default function PaymentModal({ amount, ticketName, eventTitle, eventId, ticketTypeId, onSuccess, onClose }: PaymentModalProps) {
+    const { t } = useTranslation();
     const [isProcessing, setIsProcessing] = useState(false);
     const [cardNumber, setCardNumber] = useState('');
     const [expiry, setExpiry] = useState('');
     const [cvc, setCvc] = useState('');
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        document.body.style.overflow = 'hidden';
-        return () => {
-            document.body.style.overflow = '';
-        };
-    }, []);
-
-    const formatCardNumber = (value: string) => {
-        const digits = value.replace(/\D/g, '').slice(0, 16);
-        return digits.replace(/(.{4})/g, '$1 ').trim();
-    };
-
+    const formatCardNumber = (value: string) => value.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
     const formatExpiry = (value: string) => {
         const digits = value.replace(/\D/g, '').slice(0, 4);
-        if (digits.length >= 2) {
-            return digits.slice(0, 2) + '/' + digits.slice(2);
-        }
-        return digits;
+        return digits.length >= 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
         setError(null);
-
-        if (cardNumber.replace(/\s/g, '').length < 16) {
-            setError('Please enter a valid card number.');
-            return;
-        }
-        if (expiry.length < 5) {
-            setError('Please enter a valid expiry date.');
-            return;
-        }
-        if (cvc.length < 3) {
-            setError('Please enter a valid CVC.');
-            return;
-        }
+        if (cardNumber.replace(/\s/g, '').length < 16) return setError(t('ui.payment.errCard'));
+        if (expiry.length < 5) return setError(t('ui.payment.errExpiry'));
+        if (cvc.length < 3) return setError(t('ui.payment.errCvc'));
 
         setIsProcessing(true);
-
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5220';
+            const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('accessToken')}` };
             const intentResponse = await fetch(`${apiUrl}/api/registrations/payment-intent`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-                },
-                body: JSON.stringify({ eventId, ticketTypeId }),
+                method: 'POST', headers, body: JSON.stringify({ eventId, ticketTypeId }),
             });
-
             if (!intentResponse.ok) {
-                const data = await intentResponse.json();
-                throw new Error(data.error || 'Failed to create payment intent.');
+                const data = await intentResponse.json().catch(() => ({}));
+                throw new Error(data.error || t('payment.paymentFailed'));
             }
-
             const { clientSecret } = await intentResponse.json();
-
             const confirmResponse = await fetch(`${apiUrl}/api/payments/confirm`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-                },
-                body: JSON.stringify({ clientSecret }),
+                method: 'POST', headers, body: JSON.stringify({ clientSecret }),
             });
-
-            if (!confirmResponse.ok) throw new Error('Payment confirmation failed.');
-
+            if (!confirmResponse.ok) throw new Error(t('payment.paymentFailed'));
             onSuccess();
         } catch (err: unknown) {
-            if (err instanceof Error) {
-                setError(err.message);
-            } else {
-                setError('Payment failed. Please try again.');
-            }
-        } finally {
+            setError(err instanceof Error ? err.message : t('payment.paymentFailed'));
             setIsProcessing(false);
         }
     };
 
+    const price = `$${money(amount)}`;
+
     return (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-                <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                    <div className="flex items-center gap-2">
-                        <CreditCard className="w-5 h-5 text-blue-600" />
-                        <h2 className="text-lg font-semibold text-gray-900">Payment</h2>
+        <Modal onClose={isProcessing ? () => {} : onClose} label={t('ui.payment.title')}>
+            <form onSubmit={handleSubmit}>
+                <div className="flex items-center justify-between gap-3 px-6 py-5">
+                    <div className="flex items-center gap-3">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-brand-50">
+                            <CreditCard className="h-5 w-5 text-brand-600" aria-hidden="true" />
+                        </span>
+                        <h2 className="text-[22px] font-semibold leading-[30px] text-ink">{t('ui.payment.title')}</h2>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer">
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
-
-                <div className="p-6">
-                    <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                        <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600">{ticketName}</span>
-                            <span className="font-semibold text-gray-900">${amount} USD</span>
-                        </div>
-                    </div>
-
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6">
-                        <p className="text-xs text-blue-700 font-medium mb-1">Test mode — use test card:</p>
-                        <p className="text-xs text-blue-600 font-mono">4242 4242 4242 4242</p>
-                        <p className="text-xs text-blue-600">Any future date · Any 3 digits</p>
-                    </div>
-
-                    {error && (
-                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                            {error}
-                        </div>
+                    {!isProcessing && (
+                        <button type="button" onClick={onClose} aria-label={t('close')} className="btn btn-ghost btn-icon">
+                            <X />
+                        </button>
                     )}
+                </div>
 
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Card number</label>
-                            <input
-                                type="text"
-                                value={cardNumber}
-                                onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
-                                placeholder="4242 4242 4242 4242"
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                            />
+                <div className="flex flex-col gap-4 px-6 pb-2">
+                    <div className="flex items-center justify-between gap-3 rounded-[10px] bg-surface p-4">
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-ink">{eventTitle}</p>
+                            <p className="text-xs font-medium text-subtle">{fmt(t('ui.payment.ticketLine'), { ticket: ticketName })}</p>
                         </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Expiry date</label>
-                                <input
-                                    type="text"
-                                    value={expiry}
-                                    onChange={(e) => setExpiry(formatExpiry(e.target.value))}
-                                    placeholder="MM/YY"
-                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">CVC</label>
-                                <input
-                                    type="text"
-                                    value={cvc}
-                                    onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                                    placeholder="123"
-                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                                />
-                            </div>
-                        </div>
+                        <p className="text-[22px] font-semibold text-ink">{price}</p>
                     </div>
 
-                    <button
-                        onClick={handleSubmit}
-                        disabled={isProcessing}
-                        className="w-full mt-6 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                        <Lock className="w-4 h-4" />
-                        {isProcessing ? 'Processing...' : `Pay $${amount}`}
-                    </button>
-
-                    <p className="text-xs text-gray-400 text-center mt-3">
-                        Secured by Stripe · Test mode
-                    </p>
+                    {isProcessing ? (
+                        <div className="flex flex-col items-center gap-3 py-6 text-center" role="status">
+                            <span className="h-14 w-14 animate-spin rounded-full border-[5px] border-brand-100 border-t-brand-600" aria-hidden="true" />
+                            <p className="text-lg font-semibold text-ink">{t('ui.payment.processingTitle')}</p>
+                            <p className="text-sm text-muted">{t('ui.payment.processingText')}</p>
+                        </div>
+                    ) : (
+                        <>
+                            <Alert tone="info" title={t('ui.payment.testTitle')}>{t('ui.payment.testText')}</Alert>
+                            {error && <Alert tone="danger">{error}</Alert>}
+                            <div>
+                                <label className="label" htmlFor="card">{t('ui.payment.card')}</label>
+                                <div className="relative">
+                                    <CreditCard className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-placeholder" aria-hidden="true" />
+                                    <input id="card" inputMode="numeric" autoComplete="cc-number" value={cardNumber} onChange={(e) => setCardNumber(formatCardNumber(e.target.value))} placeholder="4242 4242 4242 4242" className="input input-with-icon" />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="label" htmlFor="exp">{t('ui.payment.expiry')}</label>
+                                    <input id="exp" inputMode="numeric" autoComplete="cc-exp" value={expiry} onChange={(e) => setExpiry(formatExpiry(e.target.value))} placeholder="MM/YY" className="input" />
+                                </div>
+                                <div>
+                                    <label className="label" htmlFor="cvc">{t('ui.payment.cvc')}</label>
+                                    <input id="cvc" inputMode="numeric" autoComplete="cc-csc" value={cvc} onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="123" className="input" />
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </div>
-            </div>
-        </div>
+
+                <div className="flex flex-col items-center gap-3 p-6">
+                    <button type="submit" disabled={isProcessing} className="btn btn-primary btn-lg w-full">
+                        <Lock aria-hidden="true" />
+                        {isProcessing ? t('ui.payment.processingButton') : fmt(t('ui.payment.pay'), { amount: money(amount) })}
+                    </button>
+                    <p className="text-center text-xs font-medium text-subtle">{t('ui.payment.secured')}</p>
+                </div>
+            </form>
+        </Modal>
     );
 }

@@ -12,6 +12,9 @@ export interface EventSummary {
     status: string;
     organizerName: string;
     availableTickets: number;
+    totalTickets?: number;
+    minPrice?: number | null;
+    endDate?: string;
 }
 
 export interface TicketType {

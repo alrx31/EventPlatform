@@ -1,83 +1,38 @@
+'use client'
+
 import Link from 'next/link';
-import { Calendar, MapPin, Ticket, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Clock, MapPin, QrCode, Ticket } from 'lucide-react';
 import { MyRegistration } from '@/types';
-import { formatDate, getStatusColor } from '@/lib/utils';
+import { formatDate, money } from '@/lib/utils';
 import { useTranslation } from '@/i18n';
+import DateBlock from '@/components/ui/DateBlock';
+import StatusBadge from '@/components/ui/StatusBadge';
 
-interface RegistrationCardProps {
-    registration: MyRegistration;
-}
-
-export default function RegistrationCard({ registration }: RegistrationCardProps) {
+export default function RegistrationCard({ registration, onShow }: { registration: MyRegistration; onShow?: () => void }) {
     const { t } = useTranslation();
-    
-    const getTicketStatusInfo = (status: string) => {
-        switch (status) {
-            case 'Active':
-                return {
-                    color: 'bg-green-100 text-green-700',
-                    icon: <Clock className="w-3 h-3" />,
-                    label: t('status.Active')
-                };
-            case 'Used':
-                return {
-                    color: 'bg-blue-100 text-blue-700',
-                    icon: <CheckCircle className="w-3 h-3" />,
-                    label: t('status.Used')
-                };
-            case 'Cancelled':
-                return {
-                    color: 'bg-red-100 text-red-700',
-                    icon: <XCircle className="w-3 h-3" />,
-                    label: t('status.Cancelled')
-                };
-            default:
-                return {
-                    color: 'bg-gray-100 text-gray-600',
-                    icon: null,
-                    label: status
-                };
-        }
-    };
-    
-    const ticketInfo = getTicketStatusInfo(registration.ticketStatus);
+    const active = registration.ticketStatus === 'Active';
 
     return (
-        <div className="bg-white rounded-xl shadow-sm p-6 flex items-center justify-between">
-            <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(registration.eventStatus)}`}>
-                        {t(`status.${registration.eventStatus}`)}
-                    </span>
-                    <span className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${ticketInfo.color}`}>
-                        {ticketInfo.icon}
-                        {ticketInfo.label}
-                    </span>
-                    <h3 className="font-semibold text-gray-900">{registration.eventTitle}</h3>
-                </div>
-
-                <div className="flex items-center gap-4 text-sm text-gray-500">
-                    <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {formatDate(registration.eventStartDate, undefined, true)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {registration.eventLocation}
-                    </span>
-                    <span className="flex items-center gap-1">
-                        <Ticket className="w-3 h-3" />
-                        {registration.ticketTypeName} · {registration.isFree ? t('free') : `$${registration.ticketPrice}`}
-                    </span>
+        <article className="card flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-4">
+                <DateBlock date={registration.eventStartDate} muted={!active} />
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                        <h3 className={`truncate text-lg font-semibold leading-[26px] ${active ? 'text-ink' : 'text-muted'}`}>{registration.eventTitle}</h3>
+                        <StatusBadge status={registration.ticketStatus} kind="ticket" />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted">
+                        <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-subtle" aria-hidden="true" />{formatDate(registration.eventStartDate, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-subtle" aria-hidden="true" />{registration.eventLocation}</span>
+                        <span className="flex items-center gap-2"><Ticket className="h-4 w-4 text-subtle" aria-hidden="true" />{registration.ticketTypeName} · {registration.isFree ? t('free') : `$${money(registration.ticketPrice)}`}</span>
+                    </div>
                 </div>
             </div>
-
-            <Link
-                href={`/events/${registration.eventId}`}
-                className="ml-4 text-sm text-blue-600 hover:underline flex-shrink-0"
-            >
-                {t('events.view')}
-            </Link>
-        </div>
+            {active && onShow ? (
+                <button onClick={onShow} className="btn btn-secondary shrink-0"><QrCode aria-hidden="true" />{t('ui.tickets.show')}</button>
+            ) : (
+                <Link href={`/events/${registration.eventId}`} className="btn btn-ghost shrink-0">{t('ui.tickets.toEvent')}</Link>
+            )}
+        </article>
     );
 }

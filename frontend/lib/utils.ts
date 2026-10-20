@@ -14,16 +14,9 @@ export function formatDate(
         ...(showTime && { hour: '2-digit', minute: '2-digit' }),
     };
 
-    return new Date(dateString).toLocaleDateString(locale, options ?? defaultOptions);
-}
-
-export function getStatusColor(status: string) {
-    switch (status) {
-        case 'Published': return 'bg-green-100 text-green-700';
-        case 'Cancelled': return 'bg-red-100 text-red-700';
-        case 'Completed': return 'bg-blue-100 text-blue-700';
-        default: return 'bg-gray-100 text-gray-600';
-    }
+    const opts = options ?? defaultOptions;
+    const text = opts.hour ? new Date(dateString).toLocaleString(locale, opts) : new Date(dateString).toLocaleDateString(locale, opts);
+    return text.replace(/\s?г\./g, '');
 }
 
 export function goBack(fallback: string = '/') {
@@ -32,4 +25,26 @@ export function goBack(fallback: string = '/') {
     } else {
         window.location.href = fallback;
     }
+}
+
+export function fmt(template: string, vars: Record<string, string | number>) {
+    return Object.entries(vars).reduce((acc, [k, v]) => acc.split(`{{${k}}}`).join(String(v)), template);
+}
+
+export function money(value: number) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+export function apiError(err: unknown, fallback: string) {
+    if (err && typeof err === 'object' && 'response' in err) {
+        const r = (err as { response?: { data?: { error?: string; message?: string } } }).response;
+        return r?.data?.error || r?.data?.message || fallback;
+    }
+    return fallback;
+}
+
+export function userStatus(u: { isBlocked: boolean; role: string; isApprovedOrganizer: boolean }) {
+    if (u.isBlocked) return 'Blocked';
+    if (u.role === 'Organizer' && !u.isApprovedOrganizer) return 'Pending';
+    return 'Active';
 }

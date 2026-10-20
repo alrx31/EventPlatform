@@ -9,6 +9,7 @@ interface AuthContextType {
     isLoading: boolean;
     role: string | null;
     isApprovedOrganizer: boolean;
+    userName: string | null;
     login: (email: string, password: string) => Promise<void>;
     register: (email: string, password: string, firstName: string, lastName: string, role?: string) => Promise<void>;
     logout: () => void;
@@ -36,6 +37,19 @@ function decodeIsApprovedOrganizer(token: string): boolean {
     }
 }
 
+function decodeName(token: string): string | null {
+    try {
+        const payload = token.split('.')[1];
+        const decoded = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))));
+        const first = decoded.given_name || decoded['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname'] || '';
+        const last = decoded.family_name || decoded['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname'] || '';
+        const full = `${first} ${last}`.trim();
+        return full || decoded.email || null;
+    } catch {
+        return null;
+    }
+}
+
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -43,12 +57,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
     const [role, setRole] = useState<string | null>(null);
     const [isApprovedOrganizer, setIsApprovedOrganizer] = useState(false);
+    const [userName, setUserName] = useState<string | null>(null);
 
     useEffect(() => {
         const token = localStorage.getItem('accessToken');
         setIsAuthenticated(!!token);
         setRole(token ? decodeRole(token) : null);
         setIsApprovedOrganizer(token ? decodeIsApprovedOrganizer(token) : false);
+        setUserName(token ? decodeName(token) : null);
         setIsLoading(false);
     }, []);
 
@@ -63,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAuthenticated(true);
         setRole(decodeRole(accessToken));
         setIsApprovedOrganizer(decodeIsApprovedOrganizer(accessToken));
+        setUserName(decodeName(accessToken));
     };
 
     const register = async (email: string, password: string, firstName: string, lastName: string, role: string = 'User') => {
@@ -82,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAuthenticated(true);
         setRole(decodeRole(accessToken));
         setIsApprovedOrganizer(decodeIsApprovedOrganizer(accessToken));
+        setUserName(decodeName(accessToken));
     };
 
     const logout = useCallback(() => {
@@ -91,10 +109,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAuthenticated(false);
         setRole(null);
         setIsApprovedOrganizer(false);
+        setUserName(null);
     }, []);
     
     return (
-        <AuthContext.Provider value={ {isAuthenticated, isLoading, role, isApprovedOrganizer, login, register, logout }}>
+        <AuthContext.Provider value={ {isAuthenticated, isLoading, role, isApprovedOrganizer, userName, login, register, logout }}>
             {children}
         </AuthContext.Provider>
     )

@@ -1,384 +1,161 @@
 'use client'
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
-import { AdminUserDetail, AdminRegistration, EventSummary, PagedResult } from '@/types';
-import api from '@/lib/api';
-import Navbar from '@/components/Navbar';
-import Pagination from '@/components/Pagination';
-import ConfirmDialog from '@/components/ConfirmDialog';
-import { formatDate, getStatusColor, goBack } from '@/lib/utils';
-import { ArrowLeft, Calendar, MapPin, Ticket, XCircle } from 'lucide-react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { ArrowLeft, Ban, Calendar, Ticket } from 'lucide-react';
+import { AdminRegistration, AdminUserDetail, EventSummary, PagedResult } from '@/types';
+import api from '@/lib/api';
+import AppShell from '@/components/AppShell';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import Pagination from '@/components/Pagination';
+import StatusBadge from '@/components/ui/StatusBadge';
+import StatCard from '@/components/ui/StatCard';
+import Avatar from '@/components/ui/Avatar';
+import Tabs from '@/components/ui/Tabs';
+import EmptyState from '@/components/ui/EmptyState';
+import Alert from '@/components/ui/Alert';
+import { apiError, fmt, formatDate, money, userStatus } from '@/lib/utils';
 import { useTranslation } from '@/i18n';
 
-type Tab = 'events' | 'registrations';
+type Confirm =
+    | { kind: 'block' | 'unblock' }
+    | { kind: 'event'; id: string; name: string }
+    | { kind: 'registration'; id: string; name: string };
 
 export default function AdminUserDetailPage() {
-    const router = useRouter();
-    const params = useParams();
-    const userId = params.id as string;
-    const { isAuthenticated, isLoading: authLoading, role } = useAuth();
+    const { id } = useParams<{ id: string }>();
     const { t } = useTranslation();
-
     const [user, setUser] = useState<AdminUserDetail | null>(null);
-    const [activeTab, setActiveTab] = useState<Tab>('events');
+    const [tab, setTab] = useState<'events' | 'registrations'>('events');
     const [events, setEvents] = useState<PagedResult<EventSummary> | null>(null);
-    const [registrations, setRegistrations] = useState<PagedResult<AdminRegistration> | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
+    const [regs, setRegs] = useState<PagedResult<AdminRegistration> | null>(null);
+    const [confirm, setConfirm] = useState<Confirm | null>(null);
+    const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const [cancelRegistration, setCancelRegistration] = useState<{
-        registrationId: string;
-        eventTitle: string;
-    } | null>(null);
-    const [isCancelLoading, setIsCancelLoading] = useState(false);
+    const loadUser = () => api.get<AdminUserDetail>(`/admin/users/${id}`).then(r => setUser(r.data)).catch(() => setError('Failed to load user.'));
+    const loadEvents = (page: number) => api.get<PagedResult<EventSummary>>(`/admin/users/${id}/events`, { params: { page, pageSize: 10 } }).then(r => setEvents(r.data)).catch(() => {});
+    const loadRegs = (page: number) => api.get<PagedResult<AdminRegistration>>(`/admin/users/${id}/registrations`, { params: { page, pageSize: 10 } }).then(r => setRegs(r.data)).catch(() => {});
 
-    const [cancelEvent, setCancelEvent] = useState<{ id: string; title: string } | null>(null);
-    const [isCancelEventLoading, setIsCancelEventLoading] = useState(false);
+    useEffect(() => { loadUser(); loadEvents(1); loadRegs(1); }, [id]);
 
-    useEffect(() => {
-        if (!authLoading && !isAuthenticated) router.push('/auth/login');
-        if (!authLoading && isAuthenticated && role !== 'Admin') {
-            setError(t('errors.unauthorized'));
-            setIsLoading(false);
-        }
-    }, [authLoading, isAuthenticated, role, router]);
-
-    useEffect(() => {
-        if (isAuthenticated && role === 'Admin' && userId) {
-            api.get<AdminUserDetail>(`/admin/users/${userId}`)
-                .then(res => setUser(res.data))
-                .catch(() => setError('Failed to load user.'))
-                .finally(() => setIsLoading(false));
-        }
-    }, [isAuthenticated, role, userId]);
-
-    const fetchEvents = async (page: number) => {
+    const doConfirm = async () => {
+        if (!confirm) return;
+        setBusy(true);
         try {
-            const response = await api.get<PagedResult<EventSummary>>(`/admin/users/${userId}/events`, {
-                params: { page, pageSize: 5 },
-            });
-            setEvents(response.data);
-        } catch {
-            setError('Failed to load events.');
-        }
-    };
-
-    const fetchRegistrations = async (page: number) => {
-        try {
-            const response = await api.get<PagedResult<AdminRegistration>>(`/admin/users/${userId}/registrations`, {
-                params: { page, pageSize: 5 },
-            });
-            setRegistrations(response.data);
-        } catch {
-            setError('Failed to load registrations.');
-        }
-    };
-
-    useEffect(() => {
-        if (isAuthenticated && role === 'Admin' && userId) {
-            if (activeTab === 'events' && !events) {
-                fetchEvents(1);
-            }
-            if (activeTab === 'registrations' && !registrations) {
-                fetchRegistrations(1);
-            }
-        }
-    }, [activeTab, isAuthenticated, role, userId]);
-
-    const handleCancelRegistration = async () => {
-        if (!cancelRegistration) return;
-        setIsCancelLoading(true);
-        try {
-            await api.post(`/admin/users/${userId}/registrations/${cancelRegistration.registrationId}/cancel`);
-            setRegistrations(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    items: prev.items.filter(r => r.registrationId !== cancelRegistration.registrationId),
-                    totalCount: prev.totalCount - 1,
-                };
-            });
-            setCancelRegistration(null);
-        } catch {
-            setError('Failed to cancel registration.');
+            if (confirm.kind === 'block' || confirm.kind === 'unblock') await api.post(`/admin/users/${id}/${confirm.kind}`);
+            if (confirm.kind === 'event') await api.post(`/admin/events/${confirm.id}/cancel`);
+            if (confirm.kind === 'registration') await api.post(`/admin/users/${id}/registrations/${confirm.id}/cancel`);
+            setConfirm(null);
+            await Promise.all([loadUser(), loadEvents(events?.page ?? 1), loadRegs(regs?.page ?? 1)]);
+        } catch (err) {
+            setError(apiError(err, 'Failed to process request.'));
         } finally {
-            setIsCancelLoading(false);
+            setBusy(false);
         }
     };
 
-    const handleCancelEvent = async () => {
-        if (!cancelEvent) return;
-        setIsCancelEventLoading(true);
-        try {
-            await api.post(`/admin/events/${cancelEvent.id}/cancel`);
-            setEvents(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    items: prev.items.map(e =>
-                        e.id === cancelEvent.id ? { ...e, status: 'Cancelled' } : e
-                    ),
-                };
-            });
-            setCancelEvent(null);
-        } catch {
-            setError('Failed to cancel event.');
-        } finally {
-            setIsCancelEventLoading(false);
-        }
-    };
-
-    if (authLoading || (!isAuthenticated && !error)) return null;
+    const d: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
+    const spent = (regs?.items ?? []).filter(r => r.ticketStatus !== 'Cancelled').reduce((s, r) => s + r.ticketPrice, 0);
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <Navbar />
-
-            <div className="max-w-6xl mx-auto px-4 py-8">
-                <button
-                    onClick={() => goBack('/admin/users')}
-                    className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 mb-4 cursor-pointer"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    {t('back')}
-                </button>
-
-                {error && (
-                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                        {error}
-                    </div>
-                )}
-
-                {isLoading ? (
-                    <div className="bg-white rounded-xl shadow-sm p-6 animate-pulse">
-                        <div className="h-6 bg-gray-200 rounded w-48 mb-4" />
-                        <div className="h-4 bg-gray-200 rounded w-32" />
-                    </div>
-                ) : user && (
-                    <>
-                        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                            <div className="flex items-center gap-4 mb-4">
-                                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                                    <span className="text-blue-600 font-semibold text-lg">
-                                        {user.fullName.charAt(0)}
-                                    </span>
-                                </div>
-                                <div>
-                                    <h1 className="text-2xl font-bold text-gray-900">{user.fullName}</h1>
-                                    <p className="text-sm text-gray-500">{user.email}</p>
-                                </div>
-                                <div className="ml-auto flex items-center gap-2">
-                                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                                        user.role === 'Admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
-                                    }`}>
-                                        {user.role}
-                                    </span>
-                                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                                        user.isBlocked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                                    }`}>
-                                        {user.isBlocked ? t('userDetail.blocked') : t('userDetail.active')}
-                                    </span>
-                                </div>
+        <AppShell kind="admin">
+            <Link href="/admin/users" className="btn btn-ghost btn-sm self-start"><ArrowLeft aria-hidden="true" />{t('ui.admin.backToUsers')}</Link>
+            {error && <Alert tone="danger">{error}</Alert>}
+            {!user ? <div className="skeleton h-32" /> : (
+                <>
+                    <section className="card flex flex-col gap-5 p-6 sm:flex-row sm:items-center">
+                        <Avatar name={user.fullName} size="lg" />
+                        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                            <div className="flex flex-wrap items-center gap-2.5">
+                                <h1 className="text-[26px] font-bold leading-8 tracking-tight text-ink sm:text-[32px] sm:leading-10">{user.fullName}</h1>
+                                <StatusBadge status={userStatus(user)} kind="user" size="md" />
                             </div>
-                            <div className="flex gap-6 text-sm text-gray-500">
-                                <span>{t('userDetail.joined')} {formatDate(user.createdAt, { month: 'long', day: 'numeric', year: 'numeric' })}</span>
-                                <span>{user.eventsCount} {t('userDetail.eventsCount')}</span>
-                                <span>{user.registrationsCount} {t('userDetail.registrationsCount')}</span>
-                            </div>
+                            <p className="text-sm text-muted">{user.email} · {t(`ui.admin.roles.${user.role}`)} · {fmt(t('ui.admin.joinedOn'), { date: formatDate(user.createdAt, d) })}</p>
                         </div>
-
-                        <div className="flex border-b border-gray-200 mb-6">
-                            <button
-                                onClick={() => setActiveTab('events')}
-                                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
-                                    activeTab === 'events'
-                                        ? 'border-blue-600 text-blue-600'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                                }`}
-                            >
-                                {t('userDetail.events')} ({user.eventsCount})
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('registrations')}
-                                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
-                                    activeTab === 'registrations'
-                                        ? 'border-blue-600 text-blue-600'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                                }`}
-                            >
-                                {t('userDetail.registrations')} ({user.registrationsCount})
-                            </button>
-                        </div>
-
-                        {activeTab === 'events' && (
-                            <>
-                                {events?.items.length === 0 ? (
-                                    <div className="text-center py-16 bg-white rounded-xl shadow-sm text-gray-500">
-                                        {t('userDetail.noEvents')}
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="space-y-3">
-                                            {events?.items.map(event => (
-                                                <div key={event.id} className="bg-white rounded-xl shadow-sm p-6 flex items-center justify-between">
-                                                    <div className="flex-1">
-                                                        <div className="flex items-center gap-3 mb-2">
-                                                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(event.status)}`}>
-                                                                {t(`status.${event.status}`)}
-                                                            </span>
-                                                            <h3 className="font-semibold text-gray-900">{event.title}</h3>
-                                                        </div>
-                                                        <div className="flex items-center gap-4 text-sm text-gray-500">
-                                                            <span className="flex items-center gap-1">
-                                                                <Calendar className="w-3 h-3" />
-                                                                {formatDate(event.startDate, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                            </span>
-                                                            <span className="flex items-center gap-1">
-                                                                <MapPin className="w-3 h-3" />
-                                                                {event.location}
-                                                            </span>
-                                                            <span className="flex items-center gap-1">
-                                                                <Ticket className="w-3 h-3" />
-                                                                {event.availableTickets} {t('events.ticketsAvailable')}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Link
-                                                            href={`/events/${event.id}`}
-                                                            className="text-sm text-blue-600 hover:underline"
-                                                        >
-                                                            {t('events.view')}
-                                                        </Link>
-                                                        {event.status !== 'Cancelled' && event.status !== 'Completed' && (
-                                                            <button
-                                                                onClick={() => setCancelEvent({ id: event.id, title: event.title })}
-                                                                className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50 cursor-pointer ml-2"
-                                                            >
-                                                                <XCircle className="w-3 h-3" />
-                                                                {t('events.cancel')}
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        {events && (
-                                            <Pagination
-                                                page={events.page}
-                                                totalPages={events.totalPages}
-                                                hasNextPage={events.hasNextPage}
-                                                hasPreviousPage={events.hasPreviousPage}
-                                                onPageChange={fetchEvents}
-                                            />
+                        {user.role !== 'Admin' && (user.isBlocked ? (
+                            <button onClick={() => setConfirm({ kind: 'unblock' })} className="btn btn-secondary">{t('ui.admin.unblock')}</button>
+                        ) : (
+                            <button onClick={() => setConfirm({ kind: 'block' })} className="btn btn-danger"><Ban aria-hidden="true" />{t('ui.admin.block')}</button>
+                        ))}
+                    </section>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <StatCard icon={Calendar} label={t('ui.admin.eventsCreated')} value={user.eventsCount} hint={t('ui.admin.allTime')} />
+                        <StatCard icon={Ticket} label={t('ui.admin.registrationsMade')} value={user.registrationsCount} hint={t('ui.admin.allTime')} />
+                        <StatCard icon={Ticket} label={t('ui.admin.revenue')} value={`$${money(spent)}`} hint={t('ui.admin.allTime')} />
+                    </div>
+                </>
+            )}
+            <Tabs
+                active={tab}
+                onChange={(k) => setTab(k as 'events' | 'registrations')}
+                items={[
+                    { key: 'events', label: t('ui.admin.tabEvents'), count: events?.totalCount },
+                    { key: 'registrations', label: t('ui.admin.tabRegistrations'), count: regs?.totalCount },
+                ]}
+            />
+            {tab === 'events' && (events?.items.length ? (
+                <div className="card overflow-x-auto">
+                    <table className="table">
+                        <thead><tr><th>{t('ui.admin.colEvent')}</th><th>{t('ui.admin.colDate')}</th><th>{t('ui.admin.colStatus')}</th><th>{t('ui.admin.colSold')}</th><th /></tr></thead>
+                        <tbody>
+                            {events.items.map(e => (
+                                <tr key={e.id}>
+                                    <td><Link href={`/events/${e.id}`} className="font-semibold hover:text-brand-600">{e.title}</Link><p className="text-xs font-medium text-subtle">{e.location}</p></td>
+                                    <td className="whitespace-nowrap">{formatDate(e.startDate, d)}</td>
+                                    <td><StatusBadge status={e.status} /></td>
+                                    <td>{e.totalTickets ? `${e.totalTickets - e.availableTickets} / ${e.totalTickets}` : '—'}</td>
+                                    <td className="text-right">
+                                        {e.status !== 'Cancelled' && e.status !== 'Completed' && (
+                                            <button onClick={() => setConfirm({ kind: 'event', id: e.id, name: e.title })} className="btn btn-ghost btn-sm"><Ban aria-hidden="true" />{t('ui.admin.cancel')}</button>
                                         )}
-                                    </>
-                                )}
-                            </>
-                        )}
-
-                        {activeTab === 'registrations' && (
-                            <>
-                                {registrations?.items.length === 0 ? (
-                                    <div className="text-center py-16 bg-white rounded-xl shadow-sm text-gray-500">
-                                        {t('userDetail.noRegistrations')}
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                                            <table className="w-full">
-                                                <thead>
-                                                    <tr className="border-b border-gray-200 bg-gray-50">
-                                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Event</th>
-                                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Ticket</th>
-                                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Price</th>
-                                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
-                                                        <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {registrations?.items.map(reg => (
-                                                        <tr key={reg.registrationId} className="border-b border-gray-100 hover:bg-gray-50">
-                                                            <td className="px-6 py-4 text-sm text-gray-900">{reg.eventTitle}</td>
-                                                            <td className="px-6 py-4 text-sm text-gray-600">{reg.ticketTypeName}</td>
-                                                            <td className="px-6 py-4 text-sm text-gray-600">
-                                                                {reg.isFree ? 'Free' : `$${reg.ticketPrice}`}
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                                                                    reg.ticketStatus === 'Active' ? 'bg-green-100 text-green-700'
-                                                                        : reg.ticketStatus === 'Used' ? 'bg-blue-100 text-blue-700'
-                                                                            : 'bg-red-100 text-red-700'
-                                                                }`}>
-                                                                    {t(`status.${reg.ticketStatus}`)}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-sm text-gray-500">
-                                                                {formatDate(reg.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                            </td>
-                                                            <td className="px-6 py-4 text-right">
-                                                                {reg.ticketStatus === 'Active' && (
-                                                                    <button
-                                                                        onClick={() => setCancelRegistration({
-                                                                            registrationId: reg.registrationId,
-                                                                            eventTitle: reg.eventTitle,
-                                                                        })}
-                                                                        className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 cursor-pointer ml-auto"
-                                                                    >
-                                                                        <XCircle className="w-4 h-4" />
-                                                                        {t('events.cancel')}
-                                                                    </button>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                        {registrations && (
-                                            <Pagination
-                                                page={registrations.page}
-                                                totalPages={registrations.totalPages}
-                                                hasNextPage={registrations.hasNextPage}
-                                                hasPreviousPage={registrations.hasPreviousPage}
-                                                onPageChange={fetchRegistrations}
-                                            />
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            ) : <div className="card"><EmptyState icon={Calendar} title={t('userDetail.noEvents')} /></div>)}
+            {tab === 'events' && events && <Pagination page={events.page} totalPages={events.totalPages} hasNextPage={events.hasNextPage} hasPreviousPage={events.hasPreviousPage} onPageChange={loadEvents} />}
+            {tab === 'registrations' && (regs?.items.length ? (
+                <div className="card overflow-x-auto">
+                    <table className="table">
+                        <thead><tr><th>{t('ui.admin.colEvent')}</th><th>{t('ui.admin.colTicket')}</th><th>{t('ui.admin.colDate')}</th><th>{t('ui.admin.colStatus')}</th><th /></tr></thead>
+                        <tbody>
+                            {regs.items.map(r => (
+                                <tr key={r.registrationId}>
+                                    <td><Link href={`/events/${r.eventId}`} className="font-semibold hover:text-brand-600">{r.eventTitle}</Link></td>
+                                    <td>{r.ticketTypeName} · {r.isFree ? t('free') : `$${money(r.ticketPrice)}`}</td>
+                                    <td className="whitespace-nowrap">{formatDate(r.createdAt, d)}</td>
+                                    <td><StatusBadge status={r.ticketStatus} kind="ticket" /></td>
+                                    <td className="text-right">
+                                        {r.ticketStatus === 'Active' && (
+                                            <button onClick={() => setConfirm({ kind: 'registration', id: r.registrationId, name: r.eventTitle })} className="btn btn-ghost btn-sm"><Ban aria-hidden="true" />{t('ui.admin.cancel')}</button>
                                         )}
-                                    </>
-                                )}
-                            </>
-                        )}
-                    </>
-                )}
-            </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            ) : <div className="card"><EmptyState icon={Ticket} title={t('userDetail.noRegistrations')} /></div>)}
+            {tab === 'registrations' && regs && <Pagination page={regs.page} totalPages={regs.totalPages} hasNextPage={regs.hasNextPage} hasPreviousPage={regs.hasPreviousPage} onPageChange={loadRegs} />}
 
-            {cancelRegistration && (
+            {confirm && user && (
                 <ConfirmDialog
-                    title={t('userDetail.cancelRegistration')}
-                    message={t('userDetail.cancelRegistrationConfirm').replace('{{event}}', cancelRegistration.eventTitle)}
-                    confirmLabel={t('userDetail.cancelRegistration')}
-                    danger
-                    onConfirm={handleCancelRegistration}
-                    onClose={() => setCancelRegistration(null)}
-                    isLoading={isCancelLoading}
+                    danger={confirm.kind !== 'unblock'}
+                    title={confirm.kind === 'block' ? fmt(t('ui.admin.blockTitle'), { name: user.fullName })
+                        : confirm.kind === 'unblock' ? fmt(t('ui.admin.unblockTitle'), { name: user.fullName })
+                            : confirm.kind === 'event' ? fmt(t('ui.admin.cancelEventTitle'), { name: confirm.name })
+                                : fmt(t('ui.admin.cancelRegTitle'), { name: 'name' in confirm ? confirm.name : '' })}
+                    message={confirm.kind === 'block' ? t('ui.admin.blockText') : confirm.kind === 'unblock' ? t('ui.admin.unblockText') : confirm.kind === 'event' ? t('ui.admin.cancelEventText') : t('ui.admin.cancelRegText')}
+                    confirmLabel={confirm.kind === 'block' ? t('ui.admin.block') : confirm.kind === 'unblock' ? t('ui.admin.unblock') : t('ui.admin.cancel')}
+                    onConfirm={doConfirm}
+                    onClose={() => setConfirm(null)}
+                    isLoading={busy}
                 />
             )}
-
-            {cancelEvent && (
-                <ConfirmDialog
-                    title={t('userDetail.cancelEvent')}
-                    message={t('userDetail.cancelEventConfirm').replace('{{event}}', cancelEvent.title)}
-                    confirmLabel={t('userDetail.cancelEvent')}
-                    danger
-                    onConfirm={handleCancelEvent}
-                    onClose={() => setCancelEvent(null)}
-                    isLoading={isCancelEventLoading}
-                />
-            )}
-        </div>
+        </AppShell>
     );
 }

@@ -1,243 +1,120 @@
 'use client'
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
+import Link from 'next/link';
+import { Ban, Calendar, Search } from 'lucide-react';
 import { EventSummary, PagedResult } from '@/types';
 import api from '@/lib/api';
-import Navbar from '@/components/Navbar';
-import Pagination from '@/components/Pagination';
+import AppShell from '@/components/AppShell';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { formatDate, getStatusColor } from '@/lib/utils';
-import { Search, XCircle, Calendar, MapPin, Ticket, ArrowLeft } from 'lucide-react';
-import { goBack } from '@/lib/utils';
-import Link from 'next/link';
+import Pagination from '@/components/Pagination';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import StatusBadge from '@/components/ui/StatusBadge';
+import Alert from '@/components/ui/Alert';
+import { apiError, fmt, formatDate } from '@/lib/utils';
 import { useTranslation } from '@/i18n';
 
-const STATUS_OPTIONS = ['All', 'Draft', 'Published', 'Completed', 'Cancelled', 'UnderReview', 'Rejected'];
+const FILTERS = ['All', 'Published', 'UnderReview', 'Draft', 'Completed', 'Cancelled'] as const;
 
 export default function AdminEventsPage() {
-    const router = useRouter();
-    const { isAuthenticated, isLoading: authLoading, role } = useAuth();
     const { t } = useTranslation();
     const [events, setEvents] = useState<PagedResult<EventSummary> | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState('All');
-    const [isLoading, setIsLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [status, setStatus] = useState<string>('All');
     const [error, setError] = useState<string | null>(null);
+    const [cancel, setCancel] = useState<{ id: string; name: string } | null>(null);
+    const [busy, setBusy] = useState(false);
 
-    const [cancelEvent, setCancelEvent] = useState<{ id: string; title: string } | null>(null);
-    const [isCancelLoading, setIsCancelLoading] = useState(false);
+    const load = (s: string, st: string, page: number) => api.get<PagedResult<EventSummary>>('/admin/events', {
+        params: { searchTerm: s || undefined, status: st === 'All' ? undefined : st, page, pageSize: 10 },
+    }).then(r => setEvents(r.data)).catch(() => setError('Failed to load events.'));
+    useEffect(() => { load('', 'All', 1); }, []);
 
-    useEffect(() => {
-        if (!authLoading && !isAuthenticated) router.push('/auth/login');
-        if (!authLoading && isAuthenticated && role !== 'Admin') {
-            setError(t('errors.unauthorized'));
-            setIsLoading(false);
-        }
-    }, [authLoading, isAuthenticated, role, router]);
-
-    const fetchEvents = async (search: string, status: string, page: number) => {
-        setIsLoading(true);
+    const doCancel = async () => {
+        if (!cancel) return;
+        setBusy(true);
         try {
-            const response = await api.get<PagedResult<EventSummary>>('/admin/events', {
-                params: {
-                    searchTerm: search || undefined,
-                    status: status === 'All' ? undefined : status,
-                    page,
-                    pageSize: 10,
-                },
-            });
-            setEvents(response.data);
-        } catch {
-            setError('Failed to load events.');
+            await api.post(`/admin/events/${cancel.id}/cancel`);
+            setCancel(null);
+            await load(search, status, events?.page ?? 1);
+        } catch (err) {
+            setError(apiError(err, 'Failed to cancel event.'));
         } finally {
-            setIsLoading(false);
+            setBusy(false);
         }
     };
-
-    useEffect(() => {
-        if (isAuthenticated && role === 'Admin') {
-            fetchEvents('', 'All', 1);
-        }
-    }, [isAuthenticated, role]);
-
-    const handleSearch = () => {
-        fetchEvents(searchTerm, statusFilter, 1);
-    };
-
-    const handleStatusFilter = (status: string) => {
-        setStatusFilter(status);
-        fetchEvents(searchTerm, status, 1);
-    };
-
-    const handleCancelEvent = async () => {
-        if (!cancelEvent) return;
-        setIsCancelLoading(true);
-        try {
-            await api.post(`/admin/events/${cancelEvent.id}/cancel`);
-            setEvents(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    items: prev.items.map(e =>
-                        e.id === cancelEvent.id ? { ...e, status: 'Cancelled' } : e
-                    ),
-                };
-            });
-            setCancelEvent(null);
-        } catch {
-            setError('Failed to cancel event.');
-        } finally {
-            setIsCancelLoading(false);
-        }
-    };
-
-    if (authLoading || (!isAuthenticated && !error)) return null;
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <Navbar />
-
-            <div className="max-w-6xl mx-auto px-4 py-8">
-                <button
-                    onClick={() => goBack('/admin')}
-                    className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 mb-4 cursor-pointer"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    {t('back')}
-                </button>
-
-                <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('admin.manageEvents')}</h1>
-
-                {error && (
-                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                        {error}
-                    </div>
-                )}
-
-                <div className="flex gap-2 mb-4">
-                    <div className="flex-1 relative">
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                            placeholder="Search events..."
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-                    <button
-                        onClick={handleSearch}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer"
-                    >
-                        <Search className="w-4 h-4" />
-                        {t('search')}
-                    </button>
-                </div>
-
-                <div className="flex gap-2 mb-6">
-                    {STATUS_OPTIONS.map(status => (
-                        <button
-                            key={status}
-                            onClick={() => handleStatusFilter(status)}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                                statusFilter === status
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                            }`}
-                        >
-                            {status === 'All' ? 'All' : t(`status.${status}`)}
+        <AppShell kind="admin">
+            <PageHeader title={t('ui.admin.eventsTitle')} subtitle={events ? fmt(t('ui.admin.eventsSubtitle'), { count: events.totalCount }) : undefined} />
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                <form onSubmit={(e) => { e.preventDefault(); load(search, status, 1); }} className="relative flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-placeholder" aria-hidden="true" />
+                    <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('ui.admin.searchEvents')} aria-label={t('ui.admin.searchEvents')} className="input input-with-icon" />
+                </form>
+                <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
+                    {FILTERS.map(f => (
+                        <button key={f} className="chip" aria-pressed={status === f} onClick={() => { setStatus(f); load(search, f, 1); }}>
+                            {f === 'All' ? t('ui.admin.all') : t(`statusLabels.event.${f}`)}
                         </button>
                     ))}
                 </div>
-
-                {isLoading ? (
-                    <div className="space-y-3">
-                        {[...Array(5)].map((_, i) => (
-                            <div key={i} className="bg-white rounded-xl shadow-sm p-6 animate-pulse">
-                                <div className="h-4 bg-gray-200 rounded w-48 mb-2" />
-                                <div className="h-3 bg-gray-200 rounded w-32" />
-                            </div>
-                        ))}
-                    </div>
-                ) : events?.items.length === 0 ? (
-                    <div className="text-center py-16 bg-white rounded-xl shadow-sm text-gray-500">
-                        {t('admin.noEvents')}
-                    </div>
-                ) : (
-                    <>
-                        <div className="space-y-3">
-                            {events?.items.map(event => (
-                                <div key={event.id} className="bg-white rounded-xl shadow-sm p-6 flex items-center justify-between">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(event.status)}`}>
-                                                {t(`status.${event.status}`)}
-                                            </span>
-                                            <h3 className="font-semibold text-gray-900">{event.title}</h3>
-                                        </div>
-                                        <div className="flex items-center gap-4 text-sm text-gray-500">
-                                            <span className="flex items-center gap-1">
-                                                <Calendar className="w-3 h-3" />
-                                                {formatDate(event.startDate, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                            </span>
-                                            <span className="flex items-center gap-1">
-                                                <MapPin className="w-3 h-3" />
-                                                {event.location}
-                                            </span>
-                                            <span className="flex items-center gap-1">
-                                                <Ticket className="w-3 h-3" />
-                                                {event.availableTickets} {t('events.ticketsAvailable')}
-                                            </span>
-                                            <span className="text-gray-400">{t('events.by')} {event.organizerName}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 ml-4">
-                                        <Link
-                                            href={`/events/${event.id}`}
-                                            className="text-sm text-blue-600 hover:underline"
-                                        >
-                                            {t('events.view')}
-                                        </Link>
-                                        {event.status !== 'Cancelled' && event.status !== 'Completed' && (
-                                            <button
-                                                onClick={() => setCancelEvent({ id: event.id, title: event.title })}
-                                                className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50 cursor-pointer"
-                                            >
-                                                <XCircle className="w-3 h-3" />
-                                                {t('events.cancel')}
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {events && (
-                            <Pagination
-                                page={events.page}
-                                totalPages={events.totalPages}
-                                hasNextPage={events.hasNextPage}
-                                hasPreviousPage={events.hasPreviousPage}
-                                onPageChange={(page) => fetchEvents(searchTerm, statusFilter, page)}
-                            />
-                        )}
-                    </>
-                )}
             </div>
-
-            {cancelEvent && (
+            {error && <Alert tone="danger">{error}</Alert>}
+            {events === null ? (
+                <div className="skeleton h-64" />
+            ) : events.items.length === 0 ? (
+                <div className="card"><EmptyState icon={Calendar} title={t('ui.admin.noResults')} /></div>
+            ) : (
+                <div className="card overflow-x-auto">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>{t('ui.admin.colEvent')}</th>
+                                <th>{t('ui.admin.colOrganizer')}</th>
+                                <th>{t('ui.admin.colDate')}</th>
+                                <th>{t('ui.admin.colStatus')}</th>
+                                <th>{t('ui.admin.colSold')}</th>
+                                <th />
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {events.items.map(e => (
+                                <tr key={e.id}>
+                                    <td>
+                                        <Link href={`/events/${e.id}`} className="font-semibold text-ink hover:text-brand-600">{e.title}</Link>
+                                        <p className="text-xs font-medium text-subtle">{e.location}</p>
+                                    </td>
+                                    <td>{e.organizerName}</td>
+                                    <td className="whitespace-nowrap">{formatDate(e.startDate, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                                    <td><StatusBadge status={e.status} /></td>
+                                    <td className="whitespace-nowrap">{e.totalTickets ? `${e.totalTickets - e.availableTickets} / ${e.totalTickets}` : '—'}</td>
+                                    <td className="text-right">
+                                        {e.status !== 'Cancelled' && e.status !== 'Completed' ? (
+                                            <button onClick={() => setCancel({ id: e.id, name: e.title })} className="btn btn-ghost btn-sm"><Ban aria-hidden="true" />{t('ui.admin.cancel')}</button>
+                                        ) : (
+                                            <Link href={`/events/${e.id}`} className="btn btn-ghost btn-sm">{t('ui.admin.details')}</Link>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+            {events && <Pagination page={events.page} totalPages={events.totalPages} hasNextPage={events.hasNextPage} hasPreviousPage={events.hasPreviousPage} onPageChange={(p) => load(search, status, p)} />}
+            {cancel && (
                 <ConfirmDialog
-                    title={t('userDetail.cancelEvent')}
-                    message={t('userDetail.cancelEventConfirm').replace('{{event}}', cancelEvent.title)}
-                    confirmLabel={t('userDetail.cancelEvent')}
                     danger
-                    onConfirm={handleCancelEvent}
-                    onClose={() => setCancelEvent(null)}
-                    isLoading={isCancelLoading}
+                    title={fmt(t('ui.admin.cancelEventTitle'), { name: cancel.name })}
+                    message={t('ui.admin.cancelEventText')}
+                    confirmLabel={t('manage.cancelEvent')}
+                    onConfirm={doCancel}
+                    onClose={() => setCancel(null)}
+                    isLoading={busy}
                 />
             )}
-        </div>
+        </AppShell>
     );
 }

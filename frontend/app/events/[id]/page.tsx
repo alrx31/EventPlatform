@@ -1,50 +1,57 @@
 'use client'
 
-import {useParams, useRouter} from "next/navigation";
-import {useAuth} from "@/context/AuthContext";
-import {useEffect, useState} from "react";
-import {EventDetail, UserRegistration} from "@/types";
-import api from "@/lib/api";
-import { Calendar, MapPin, Ticket, ArrowLeft, Users } from 'lucide-react';
-import Navbar from "@/components/Navbar";
-import { formatDate, getStatusColor, goBack } from '@/lib/utils';
-import EventDetailSkeleton from "@/components/EventDetailSkeleton";
+import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft, Calendar, CircleCheck, Clock, Lock, MapPin } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { EventDetail, TicketType, UserRegistration } from '@/types';
+import api from '@/lib/api';
+import Navbar from '@/components/Navbar';
+import Footer from '@/components/Footer';
+import EventDetailSkeleton from '@/components/EventDetailSkeleton';
 import PaymentModal from '@/components/PaymentModal';
+import EventCover from '@/components/ui/EventCover';
+import StatusBadge from '@/components/ui/StatusBadge';
+import Alert from '@/components/ui/Alert';
+import Avatar from '@/components/ui/Avatar';
+import { apiError, fmt, formatDate, goBack, money } from '@/lib/utils';
 import { useTranslation } from '@/i18n';
 
-export default function EventDetailPage () {
-    const { id } = useParams<{ id: string}>();
+const DT: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
+
+export default function EventDetailPage() {
+    const { id } = useParams<{ id: string }>();
     const router = useRouter();
     const { isAuthenticated, isLoading: authLoading } = useAuth();
     const { t } = useTranslation();
 
     const [event, setEvent] = useState<EventDetail | null>(null);
-    const [userRegistration, setUserRegistration] = useState<UserRegistration | null>(null);
+    const [registration, setRegistration] = useState<UserRegistration | null>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [registeringTicketId, setRegisteringTicketId] = useState<string | null>(null);
-    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [busyTicket, setBusyTicket] = useState<string | null>(null);
+    const [justRegistered, setJustRegistered] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [paymentModal, setPaymentModal] = useState<{
-        amount: number;
-        ticketName: string;
-        eventId: string;
-        ticketTypeId: string;
-    } | null>(null);
+    const [payFor, setPayFor] = useState<TicketType | null>(null);
+
+    const loadRegistration = async () => {
+        try {
+            const r = await api.get<UserRegistration>(`/registrations/my/${id}`);
+            setRegistration(r.data);
+            return r.data;
+        } catch {
+            return null;
+        }
+    };
 
     useEffect(() => {
         const load = async () => {
             try {
-                const response = await api.get(`/events/${id}`)
+                const response = await api.get<EventDetail>(`/events/${id}`);
                 setEvent(response.data);
-
-                if (isAuthenticated) {
-                    try {
-                        const regResponse = await api.get<UserRegistration>(`/registrations/my/${id}`);
-                        setUserRegistration(regResponse.data);
-                    } catch {}
-                }
+                if (isAuthenticated) await loadRegistration();
             } catch {
-                router.push("/");
+                router.push('/');
             } finally {
                 setIsLoading(false);
             }
@@ -52,190 +59,180 @@ export default function EventDetailPage () {
         if (!authLoading) load();
     }, [id, router, isAuthenticated, authLoading]);
 
-    const handleRegister = async (ticketTypeId: string, isFree: boolean) => {
+    const refreshEvent = async () => {
+        const updated = await api.get<EventDetail>(`/events/${id}`);
+        setEvent(updated.data);
+    };
+
+    const handleTicket = async (tt: TicketType) => {
         if (!isAuthenticated) {
-            router.push("/auth/login");
+            router.push('/auth/login');
             return;
         }
-
         setError(null);
-        setSuccessMessage(null);
-
-        try {
-            if (isFree) {
-                await api.post('/registrations', {
-                    eventId: id,
-                    ticketTypeId,
-                });
-                setSuccessMessage('Successfully registered! Check your email for the ticket.');
-                const regResponse = await api.get<UserRegistration>(`/registrations/my/${id}`);
-                setUserRegistration(regResponse.data);
-            } else {
-                setPaymentModal({
-                    amount: event!.ticketTypes.find(tt => tt.id === ticketTypeId)?.price || 0,
-                    ticketName: event!.ticketTypes.find(tt => tt.id === ticketTypeId)?.name || 'Ticket',
-                    eventId: id,
-                    ticketTypeId,
-                });
-            }
-            const updated = await api.get(`/events/${id}`);
-            setEvent(updated.data);
-        } catch (err: unknown) {
-            if (err && typeof err === 'object' && 'response' in err) {
-                const axiosErr = err as { response?: { data?: { error?: string } } };
-                setError(axiosErr.response?.data?.error || 'Registration failed.');
-            } else {
-                setError('Registration failed.');
-            }
-        } finally {
-            setRegisteringTicketId(null);
+        if (!tt.isFree) {
+            setPayFor(tt);
+            return;
         }
+        setBusyTicket(tt.id);
+        try {
+            await api.post('/registrations', { eventId: id, ticketTypeId: tt.id });
+            await loadRegistration();
+            await refreshEvent();
+            setJustRegistered(true);
+        } catch (err) {
+            setError(apiError(err, t('events.registerFailed')));
+        } finally {
+            setBusyTicket(null);
+        }
+    };
+
+    const afterPayment = async () => {
+        setPayFor(null);
+        setJustRegistered(true);
+        for (let i = 0; i < 4; i++) {
+            const reg = await loadRegistration();
+            if (reg?.ticketStatus === 'Active') break;
+            await new Promise(r => setTimeout(r, 700));
+        }
+        await refreshEvent();
     };
 
     if (isLoading) {
         return (
-            <div className="min-h-screen bg-gray-50">
+            <div className="min-h-screen">
                 <Navbar />
                 <EventDetailSkeleton />
             </div>
         );
     }
+    if (!event) return null;
 
-    if(!event) return null;
+    const hasActive = registration?.ticketStatus === 'Active';
+    const onSale = event.status === 'Published';
+    const regTicket = event.ticketTypes.find(tt => tt.id === registration?.ticketTypeId);
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="flex min-h-screen flex-col">
             <Navbar />
-
-            <div className="max-w-5xl mx-auto px-4 py-8">
-                <button
-                    onClick={() => goBack('/')}
-                    className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6 cursor-pointer"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    {t('back')}
+            <main id="main" className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 pb-16 pt-6 xl:px-0">
+                <button onClick={() => goBack('/')} className="btn btn-ghost btn-sm self-start">
+                    <ArrowLeft aria-hidden="true" />
+                    {t('ui.event.back')}
                 </button>
 
-                <div className="bg-white rounded-xl shadow-sm p-8">
-                    <div className="flex items-start justify-between mb-6">
-                        <div>
-                            <span className={`inline-block text-xs font-medium px-2 py-1 rounded-full mb-3 ${getStatusColor(event.status)}`}>
-                                {t(`status.${event.status}`)}
-                            </span>
-                            <h1 className="text-3xl font-bold text-gray-900">{event.title}</h1>
-                            <p className="text-gray-500 mt-1">{t('events.by')} {event.organizerName}</p>
-                        </div>
-                    </div>
+                <EventCover seed={event.id} date={event.startDate} className="h-[200px] w-full rounded-[20px] md:h-[320px]" />
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 p-4 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                            <Calendar className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                            <div>
-                                <p className="text-xs text-gray-500">{t('events.start')}</p>
-                                <p className="text-sm font-medium text-gray-900">{formatDate(event.startDate, undefined, true)}</p>
+                <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+                    <div className="flex min-w-0 flex-1 flex-col gap-6">
+                        <div className="flex flex-col gap-4">
+                            <div><StatusBadge status={event.status} size="md" /></div>
+                            <h1 className="text-[26px] font-bold leading-8 tracking-tight text-ink md:text-[32px] md:leading-10">{event.title}</h1>
+                            <div className="flex items-center gap-2.5">
+                                <Avatar name={event.organizerName} />
+                                <div>
+                                    <p className="text-xs font-medium text-subtle">{t('ui.event.organizer')}</p>
+                                    <p className="text-sm font-semibold text-ink">{event.organizerName}</p>
+                                </div>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                            <Calendar className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                            <div>
-                                <p className="text-xs text-gray-500">{t('events.end')}</p>
-                                <p className="text-sm font-medium text-gray-900">{formatDate(event.endDate, undefined, true)}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <MapPin className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                            <div>
-                                <p className="text-xs text-gray-500">{t('events.location')}</p>
-                                <p className="text-sm font-medium text-gray-900">{event.location}</p>
-                            </div>
-                        </div>
-                    </div>
 
-                    <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-3">{t('events.aboutEvent')}</h2>
-                        <p className="text-gray-600 leading-relaxed whitespace-pre-wrap">{event.description}</p>
-                    </div>
-
-                    {successMessage && (
-                        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-                            {successMessage}
-                        </div>
-                    )}
-                    {error && (
-                        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                            {error}
-                        </div>
-                    )}
-
-                    {event.status === 'Published' && (
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                <Ticket className="w-5 h-5" />
-                                {t('events.tickets')}
-                            </h2>
-                            <div className="space-y-3">
-                                {event.ticketTypes.map((ticketType) => (
-                                    <div
-                                        key={ticketType.id}
-                                        className="flex items-center justify-between p-4 border border-gray-200 rounded-lg"
-                                    >
-                                        <div>
-                                            <p className="font-medium text-gray-900">{ticketType.name}</p>
-                                            <div className="flex items-center gap-3 mt-1">
-                                                <p className="text-sm text-gray-500">
-                                                    {ticketType.isFree ? t('free') : `$${ticketType.price}`}
-                                                </p>
-                                                <span className="text-gray-300">•</span>
-                                                <p className="text-sm text-gray-500 flex items-center gap-1">
-                                                    <Users className="w-3 h-3" />
-                                                    {ticketType.availableQuantity} {t('events.availableOf')} {ticketType.totalQuantity} {t('events.ticketsAvailable')}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={() => handleRegister(ticketType.id, ticketType.isFree)}
-                                            disabled={
-                                                ticketType.availableQuantity === 0 ||
-                                                registeringTicketId === ticketType.id ||
-                                                userRegistration?.ticketStatus === 'Active'
-                                            }
-                                            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                                        >
-                                            {userRegistration?.ticketTypeId === ticketType.id && userRegistration?.ticketStatus === 'Active'
-                                                ? t('events.registered')
-                                                : registeringTicketId === ticketType.id
-                                                    ? t('events.processing')
-                                                    : ticketType.availableQuantity === 0
-                                                        ? t('events.soldOut')
-                                                        : ticketType.isFree
-                                                            ? t('events.register')
-                                                            : `Buy - $${ticketType.price}`}
-                                        </button>
+                        <div className="card grid grid-cols-1 gap-5 p-5 sm:grid-cols-3">
+                            {[
+                                { icon: Calendar, label: t('ui.event.start'), value: formatDate(event.startDate, DT) },
+                                { icon: Clock, label: t('ui.event.end'), value: formatDate(event.endDate, DT) },
+                                { icon: MapPin, label: t('ui.event.place'), value: event.location },
+                            ].map(f => (
+                                <div key={f.label} className="flex items-center gap-3">
+                                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-brand-50">
+                                        <f.icon className="h-5 w-5 text-brand-600" aria-hidden="true" />
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-medium text-subtle">{f.label}</p>
+                                        <p className="text-sm font-semibold text-ink">{f.value}</p>
                                     </div>
-                                ))}
-                            </div>
+                                </div>
+                            ))}
                         </div>
-                    )}
+
+                        <section className="flex flex-col gap-3">
+                            <h2 className="text-[22px] font-semibold leading-[30px] text-ink">{t('ui.event.about')}</h2>
+                            <p className="whitespace-pre-wrap text-[15px] leading-6 text-muted">{event.description}</p>
+                        </section>
+                    </div>
+
+                    <aside className="card flex w-full flex-col gap-4 p-5 lg:sticky lg:top-24 lg:w-[400px] lg:shrink-0">
+                        {justRegistered && hasActive && (
+                            <Alert
+                                tone="success"
+                                title={t('ui.event.successTitle')}
+                                action={<Link href="/dashboard" className="btn btn-secondary btn-sm">{t('ui.event.myTickets')}</Link>}
+                            >
+                                {fmt(t('ui.event.successText'), { ticket: regTicket ? `${regTicket.name} · ${regTicket.isFree ? t('free') : `$${money(regTicket.price)}`}` : registration?.ticketTypeName ?? '' })}
+                            </Alert>
+                        )}
+                        <div>
+                            <h2 className="text-lg font-semibold text-ink">{t('ui.event.tickets')}</h2>
+                            <p className="text-sm text-muted">{t('ui.event.chooseTicket')}</p>
+                        </div>
+                        {!isAuthenticated && onSale && (
+                            <Alert tone="info" title={t('ui.event.loginTitle')} action={<Link href="/auth/login" className="btn btn-secondary btn-sm">{t('ui.event.login')}</Link>}>
+                                {t('ui.event.loginText')}
+                            </Alert>
+                        )}
+                        {!onSale && <Alert tone="warning" title={t('ui.event.notOnSale')}>{t('ui.event.notOnSaleText')}</Alert>}
+                        {error && <Alert tone="danger">{error}</Alert>}
+
+                        {event.ticketTypes.length === 0 && <p className="text-sm text-subtle">{t('ui.event.noTicketTypes')}</p>}
+                        {event.ticketTypes.map(tt => {
+                            const mine = hasActive && registration?.ticketTypeId === tt.id;
+                            const soldOut = tt.availableQuantity === 0;
+                            return (
+                                <div key={tt.id} className={`flex items-center gap-3 rounded-[14px] border p-4 ${mine ? 'border-success-border bg-success-bg' : 'border-line bg-white'}`}>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-semibold text-ink">{tt.name}</p>
+                                        <p className={`text-lg font-semibold leading-[26px] ${tt.isFree ? 'text-success-fg' : soldOut ? 'text-subtle' : 'text-ink'}`}>
+                                            {tt.isFree ? t('free') : `$${money(tt.price)}`}
+                                        </p>
+                                        <p className="text-xs font-medium text-subtle">
+                                            {soldOut ? fmt(t('ui.event.quotaFull'), { total: tt.totalQuantity }) : fmt(t('ui.event.quota'), { available: tt.availableQuantity, total: tt.totalQuantity })}
+                                        </p>
+                                    </div>
+                                    {mine ? (
+                                        <span className="flex items-center gap-1.5 text-sm font-semibold text-success-fg">
+                                            <CircleCheck className="h-[18px] w-[18px]" aria-hidden="true" />
+                                            {t('ui.event.registered')}
+                                        </span>
+                                    ) : onSale && (
+                                        <button
+                                            onClick={() => handleTicket(tt)}
+                                            disabled={soldOut || busyTicket === tt.id || hasActive}
+                                            className={`btn ${soldOut ? 'btn-secondary' : 'btn-primary'}`}
+                                        >
+                                            {busyTicket === tt.id ? t('events.processing') : soldOut ? t('ui.event.soldOut') : tt.isFree ? t('ui.event.register') : fmt(t('ui.event.buy'), { price: money(tt.price) })}
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        <p className="flex items-start gap-2 text-xs font-medium text-subtle">
+                            <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                            {t('ui.event.note')}
+                        </p>
+                    </aside>
                 </div>
-            </div>
-            {paymentModal && (
+            </main>
+            <Footer />
+
+            {payFor && (
                 <PaymentModal
-                    amount={paymentModal.amount}
-                    ticketName={paymentModal.ticketName}
-                    eventId={paymentModal.eventId}
-                    ticketTypeId={paymentModal.ticketTypeId}
-                    onSuccess={async () => {
-                        setPaymentModal(null);
-                        setSuccessMessage(t('payment.paymentSuccess'));
-
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-
-                        const regResponse = await api.get<UserRegistration>(`/registrations/my/${id}`);
-                        setUserRegistration(regResponse.data);
-                        const updated = await api.get<EventDetail>(`/events/${id}`);
-                        setEvent(updated.data);
-                    }}
-                    onClose={() => setPaymentModal(null)}
+                    amount={payFor.price}
+                    ticketName={payFor.name}
+                    eventTitle={event.title}
+                    eventId={event.id}
+                    ticketTypeId={payFor.id}
+                    onSuccess={afterPayment}
+                    onClose={() => setPayFor(null)}
                 />
             )}
         </div>

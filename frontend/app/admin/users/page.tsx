@@ -1,249 +1,114 @@
 'use client'
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
+import Link from 'next/link';
+import { Ban, Search, Users } from 'lucide-react';
 import { AdminUser, PagedResult } from '@/types';
 import api from '@/lib/api';
-import Navbar from '@/components/Navbar';
-import Pagination from '@/components/Pagination';
+import AppShell from '@/components/AppShell';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { formatDate } from '@/lib/utils';
-import { Search, Ban, CheckCircle, ArrowLeft, Eye } from 'lucide-react';
-import Link from 'next/link';
-import { goBack } from '@/lib/utils';
+import Pagination from '@/components/Pagination';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import StatusBadge from '@/components/ui/StatusBadge';
+import Avatar from '@/components/ui/Avatar';
+import Alert from '@/components/ui/Alert';
+import { apiError, fmt, formatDate, userStatus } from '@/lib/utils';
 import { useTranslation } from '@/i18n';
 
 export default function AdminUsersPage() {
-    const router = useRouter();
-    const { isAuthenticated, isLoading: authLoading, role } = useAuth();
     const { t } = useTranslation();
     const [users, setUsers] = useState<PagedResult<AdminUser> | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(true);
+    const [search, setSearch] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [action, setAction] = useState<{ type: 'block' | 'unblock'; id: string; name: string } | null>(null);
+    const [busy, setBusy] = useState(false);
 
-    const [confirmAction, setConfirmAction] = useState<{
-        type: 'block' | 'unblock';
-        userId: string;
-        userName: string;
-    } | null>(null);
-    const [isActionLoading, setIsActionLoading] = useState(false);
+    const load = (s: string, page: number) => api.get<PagedResult<AdminUser>>('/admin/users', { params: { searchTerm: s || undefined, page, pageSize: 10 } })
+        .then(r => setUsers(r.data)).catch(() => setError('Failed to load users.'));
+    useEffect(() => { load('', 1); }, []);
 
-    useEffect(() => {
-        if (!authLoading && !isAuthenticated) router.push('/auth/login');
-        if (!authLoading && isAuthenticated && role !== 'Admin') {
-            setError(t('errors.unauthorized'));
-            setIsLoading(false);
-        }
-    }, [authLoading, isAuthenticated, role, router]);
-
-    const fetchUsers = async (search: string, page: number) => {
-        setIsLoading(true);
+    const doAction = async () => {
+        if (!action) return;
+        setBusy(true);
         try {
-            const response = await api.get<PagedResult<AdminUser>>('/admin/users', {
-                params: { searchTerm: search || undefined, page, pageSize: 10 },
-            });
-            setUsers(response.data);
-        } catch {
-            setError('Failed to load users.');
+            await api.post(`/admin/users/${action.id}/${action.type}`);
+            setUsers(prev => prev && { ...prev, items: prev.items.map(u => u.id === action.id ? { ...u, isBlocked: action.type === 'block' } : u) });
+            setAction(null);
+        } catch (err) {
+            setError(apiError(err, 'Failed to update user.'));
         } finally {
-            setIsLoading(false);
+            setBusy(false);
         }
     };
-
-    useEffect(() => {
-        if (isAuthenticated && role === 'Admin') {
-            fetchUsers('', 1);
-        }
-    }, [isAuthenticated, role]);
-
-    const handleSearch = () => {
-        fetchUsers(searchTerm, 1);
-    };
-
-    const handleBlockUnblock = async () => {
-        if (!confirmAction) return;
-        setIsActionLoading(true);
-        try {
-            if (confirmAction.type === 'block') {
-                await api.post(`/admin/users/${confirmAction.userId}/block`);
-            } else {
-                await api.post(`/admin/users/${confirmAction.userId}/unblock`);
-            }
-            setUsers(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    items: prev.items.map(u =>
-                        u.id === confirmAction.userId
-                            ? { ...u, isBlocked: confirmAction.type === 'block' }
-                            : u
-                    ),
-                };
-            });
-            setConfirmAction(null);
-        } catch {
-            setError('Failed to update user.');
-        } finally {
-            setIsActionLoading(false);
-        }
-    };
-
-    if (authLoading || (!isAuthenticated && !error)) return null;
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <Navbar />
-
-            <div className="max-w-6xl mx-auto px-4 py-8">
-                <button
-                    onClick={() => goBack('/admin')}
-                    className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 mb-4 cursor-pointer"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    {t('back')}
-                </button>
-
-                <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('admin.manageUsers')}</h1>
-
-                {error && (
-                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                        {error}
-                    </div>
-                )}
-
-                <div className="flex gap-2 mb-6">
-                    <div className="flex-1 relative">
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                            placeholder={t('admin.searchPlaceholder')}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-                    <button
-                        onClick={handleSearch}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer"
-                    >
-                        <Search className="w-4 h-4" />
-                        {t('search')}
-                    </button>
+        <AppShell kind="admin">
+            <PageHeader title={t('ui.admin.usersTitle')} subtitle={users ? fmt(t('ui.admin.usersSubtitle'), { count: users.totalCount }) : undefined} />
+            <form onSubmit={(e) => { e.preventDefault(); load(search, 1); }} className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-placeholder" aria-hidden="true" />
+                <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('ui.admin.searchUsers')} aria-label={t('ui.admin.searchUsers')} className="input input-with-icon" />
+            </form>
+            {error && <Alert tone="danger">{error}</Alert>}
+            {users === null ? (
+                <div className="skeleton h-64" />
+            ) : users.items.length === 0 ? (
+                <div className="card"><EmptyState icon={Users} title={t('ui.admin.noResults')} /></div>
+            ) : (
+                <div className="card overflow-x-auto">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>{t('ui.admin.colUser')}</th>
+                                <th>{t('ui.admin.colRole')}</th>
+                                <th>{t('ui.admin.colJoined')}</th>
+                                <th>{t('ui.admin.colStatus')}</th>
+                                <th className="text-right">{t('ui.admin.colActions')}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {users.items.map(u => (
+                                <tr key={u.id}>
+                                    <td>
+                                        <Link href={`/admin/users/${u.id}`} className="flex items-center gap-3">
+                                            <Avatar name={u.fullName} size="md" />
+                                            <div>
+                                                <p className="font-semibold hover:text-brand-600">{u.fullName}</p>
+                                                <p className="text-xs font-medium text-subtle">{u.email}</p>
+                                            </div>
+                                        </Link>
+                                    </td>
+                                    <td>{t(`ui.admin.roles.${u.role}`)}</td>
+                                    <td className="whitespace-nowrap">{formatDate(u.createdAt, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                                    <td><StatusBadge status={userStatus(u)} kind="user" /></td>
+                                    <td>
+                                        <div className="flex justify-end gap-2">
+                                            {u.role !== 'Admin' && (u.isBlocked ? (
+                                                <button onClick={() => setAction({ type: 'unblock', id: u.id, name: u.fullName })} className="btn btn-secondary btn-sm">{t('ui.admin.unblock')}</button>
+                                            ) : (
+                                                <button onClick={() => setAction({ type: 'block', id: u.id, name: u.fullName })} className="btn btn-ghost btn-sm"><Ban aria-hidden="true" />{t('ui.admin.block')}</button>
+                                            ))}
+                                            <Link href={`/admin/users/${u.id}`} className="btn btn-secondary btn-sm">{t('ui.admin.profile')}</Link>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
-
-                {isLoading ? (
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                        {[...Array(5)].map((_, i) => (
-                            <div key={i} className="p-4 border-b border-gray-100 animate-pulse">
-                                <div className="h-4 bg-gray-200 rounded w-48 mb-2" />
-                                <div className="h-3 bg-gray-200 rounded w-32" />
-                            </div>
-                        ))}
-                    </div>
-                ) : users?.items.length === 0 ? (
-                    <div className="text-center py-16 bg-white rounded-xl shadow-sm text-gray-500">
-                        {t('admin.noUsers')}
-                    </div>
-                ) : (
-                    <>
-                        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="border-b border-gray-200 bg-gray-50">
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Email</th>
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Role</th>
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Events</th>
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Registrations</th>
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Joined</th>
-                                        <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                                        <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {users?.items.map((user) => (
-                                        <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                            <td className="px-6 py-4 text-sm text-gray-900">{user.email}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{user.fullName}</td>
-                                            <td className="px-6 py-4">
-                                                <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                                                    user.role === 'Admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
-                                                }`}>
-                                                    {user.role}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{user.eventsCount}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{user.registrationsCount}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-500">{formatDate(user.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })}</td>
-                                            <td className="px-6 py-4">
-                                                <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                                                    user.isBlocked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                                                }`}>
-                                                    {user.isBlocked ? t('status.Blocked') : t('userDetail.active')}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <div className="flex items-center gap-2 justify-end">
-                                                    <Link
-                                                        href={`/admin/users/${user.id}`}
-                                                        className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                                                    >
-                                                        <Eye className="w-4 h-4" />
-                                                        {t('events.view')}
-                                                    </Link>
-                                                    {user.role !== 'Admin' && (
-                                                        user.isBlocked ? (
-                                                            <button
-                                                                onClick={() => setConfirmAction({ type: 'unblock', userId: user.id, userName: user.fullName })}
-                                                                className="flex items-center gap-1 text-sm text-green-600 hover:text-green-700 cursor-pointer"
-                                                            >
-                                                                <CheckCircle className="w-4 h-4" />
-                                                                Unblock
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                onClick={() => setConfirmAction({ type: 'block', userId: user.id, userName: user.fullName })}
-                                                                className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 cursor-pointer"
-                                                            >
-                                                                <Ban className="w-4 h-4" />
-                                                                Block
-                                                            </button>
-                                                        )
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {users && (
-                            <Pagination
-                                page={users.page}
-                                totalPages={users.totalPages}
-                                hasNextPage={users.hasNextPage}
-                                hasPreviousPage={users.hasPreviousPage}
-                                onPageChange={(page) => fetchUsers(searchTerm, page)}
-                            />
-                        )}
-                    </>
-                )}
-            </div>
-
-            {confirmAction && (
+            )}
+            {users && <Pagination page={users.page} totalPages={users.totalPages} hasNextPage={users.hasNextPage} hasPreviousPage={users.hasPreviousPage} onPageChange={(p) => load(search, p)} />}
+            {action && (
                 <ConfirmDialog
-                    title={confirmAction.type === 'block' ? 'Block User' : 'Unblock User'}
-                    message={`Are you sure you want to ${confirmAction.type} "${confirmAction.userName}"?`}
-                    confirmLabel={confirmAction.type === 'block' ? 'Block' : 'Unblock'}
-                    danger={confirmAction.type === 'block'}
-                    onConfirm={handleBlockUnblock}
-                    onClose={() => setConfirmAction(null)}
-                    isLoading={isActionLoading}
+                    danger={action.type === 'block'}
+                    title={fmt(t(action.type === 'block' ? 'ui.admin.blockTitle' : 'ui.admin.unblockTitle'), { name: action.name })}
+                    message={t(action.type === 'block' ? 'ui.admin.blockText' : 'ui.admin.unblockText')}
+                    confirmLabel={action.type === 'block' ? t('ui.admin.block') : t('ui.admin.unblock')}
+                    onConfirm={doAction}
+                    onClose={() => setAction(null)}
+                    isLoading={busy}
                 />
             )}
-        </div>
+        </AppShell>
     );
 }

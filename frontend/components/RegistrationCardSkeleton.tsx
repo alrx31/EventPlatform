@@ -1,16 +1,12 @@
 export default function RegistrationCardSkeleton() {
     return (
-        <div className="bg-white rounded-xl shadow-sm p-6 animate-pulse">
-            <div className="flex items-center gap-3 mb-2">
-                <div className="h-5 bg-gray-200 rounded-full w-20"></div>
-                <div className="h-5 bg-gray-200 rounded-full w-16"></div>
-                <div className="h-5 bg-gray-200 rounded w-1/3"></div>
+        <div className="card flex items-center gap-4 p-4" aria-hidden="true">
+            <div className="skeleton h-16 w-16 rounded-[10px]" />
+            <div className="flex flex-1 flex-col gap-2">
+                <div className="skeleton h-5 w-1/3" />
+                <div className="skeleton h-4 w-2/3" />
             </div>
-            <div className="flex gap-4">
-                <div className="h-4 bg-gray-200 rounded w-32"></div>
-                <div className="h-4 bg-gray-200 rounded w-24"></div>
-                <div className="h-4 bg-gray-200 rounded w-28"></div>
-            </div>
+            <div className="skeleton h-10 w-36 rounded-[10px]" />
         </div>
     );
 }

@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect } from 'react';
-import { X, AlertTriangle } from 'lucide-react';
+import { CircleAlert, CircleCheck } from 'lucide-react';
+import Modal from '@/components/ui/Modal';
 import { useTranslation } from '@/i18n';
 
 interface ConfirmDialogProps {
@@ -14,62 +14,27 @@ interface ConfirmDialogProps {
     danger?: boolean;
 }
 
-export default function ConfirmDialog({
-    title,
-    message,
-    confirmLabel,
-    onConfirm,
-    onClose,
-    isLoading = false,
-    danger = false,
-}: ConfirmDialogProps) {
+export default function ConfirmDialog({ title, message, confirmLabel, onConfirm, onClose, isLoading = false, danger = false }: ConfirmDialogProps) {
     const { t } = useTranslation();
-    
-    useEffect(() => {
-        document.body.style.overflow = 'hidden';
-        return () => {
-            document.body.style.overflow = '';
-        };
-    }, []);
+    const Icon = danger ? CircleAlert : CircleCheck;
 
     return (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-                <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                    <div className="flex items-center gap-2">
-                        <AlertTriangle className={`w-5 h-5 ${danger ? 'text-red-600' : 'text-yellow-500'}`} />
-                        <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
-                    </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer">
-                        <X className="w-5 h-5" />
+        <Modal onClose={onClose} label={title} width="max-w-[440px]">
+            <div className="flex flex-col gap-5 p-6">
+                <span className={`flex h-12 w-12 items-center justify-center rounded-full ${danger ? 'bg-danger-bg text-danger-fg' : 'bg-info-bg text-info-fg'}`}>
+                    <Icon className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <div className="flex flex-col gap-1.5">
+                    <h2 className="text-[22px] font-semibold leading-[30px] text-ink">{title}</h2>
+                    <p className="text-sm text-muted">{message}</p>
+                </div>
+                <div className="flex justify-end gap-3">
+                    <button onClick={onClose} disabled={isLoading} className="btn btn-secondary">{t('cancel')}</button>
+                    <button onClick={onConfirm} disabled={isLoading} className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`}>
+                        {isLoading ? t('dialog.processing') : (confirmLabel || t('dialog.confirm'))}
                     </button>
                 </div>
-
-                <div className="p-6">
-                    <p className="text-sm text-gray-600 mb-6">{message}</p>
-
-                    <div className="flex gap-3">
-                        <button
-                            onClick={onConfirm}
-                            disabled={isLoading}
-                            className={`flex-1 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 cursor-pointer ${
-                                danger
-                                    ? 'bg-red-600 hover:bg-red-700'
-                                    : 'bg-blue-600 hover:bg-blue-700'
-                            }`}
-                        >
-                            {isLoading ? t('dialog.processing') : (confirmLabel || t('dialog.confirm'))}
-                        </button>
-                        <button
-                            onClick={onClose}
-                            disabled={isLoading}
-                            className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
-                        >
-                            {t('cancel')}
-                        </button>
-                    </div>
-                </div>
             </div>
-        </div>
+        </Modal>
     );
 }
